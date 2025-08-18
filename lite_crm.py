@@ -4,8 +4,8 @@
     import pandas as pd
     import streamlit as st
     from datetime import datetime, date, timedelta
-    import bcrypt
     import secrets
+    import hashlib, hmac, base64, os
 
     DB_PATH = "lite_crm.db"
 
@@ -28,14 +28,34 @@
         return cur.fetchone() is not None
 
     # ---------- Auth helpers ----------
-    def hash_password(password: str) -> bytes:
-        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+    - def hash_password(password: str) -> bytes:
+-     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt())
+-
+- def check_password(password: str, hashed: bytes) -> bool:
+-     try:
+-         return bcrypt.checkpw(password.encode("utf-8"), hashed)
+-     except Exception:
+-         return False
++PBKDF_ALG = "sha256"
++PBKDF_ITER = 120_000   # OWASP baseline
++SALT_BYTES = 16
++KEY_LEN = 32
++
++def hash_password(password: str) -> str:
++    salt = os.urandom(SALT_BYTES)
++    dk = hashlib.pbkdf2_hmac(PBKDF_ALG, password.encode("utf-8"), salt, PBKDF_ITER, dklen=KEY_LEN)
++    return f"pbkdf2${PBKDF_ALG}${PBKDF_ITER}$" + base64.b64encode(salt).decode() + "$" + base64.b64encode(dk).decode()
++
++def check_password(password: str, stored: str) -> bool:
++    try:
++        _, alg, iters, salt_b64, dk_b64 = stored.split("$")
++        salt = base64.b64decode(salt_b64)
++        expected = base64.b64decode(dk_b64)
++        dk = hashlib.pbkdf2_hmac(alg, password.encode("utf-8"), salt, int(iters), dklen=len(expected))
++        return hmac.compare_digest(dk, expected)
++    except Exception:
++        return False
 
-    def check_password(password: str, hashed: bytes) -> bool:
-        try:
-            return bcrypt.checkpw(password.encode("utf-8"), hashed)
-        except Exception:
-            return False
 
     # ---------- DB Init / Migration ----------
     def init_db():
@@ -48,7 +68,7 @@
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
             email TEXT UNIQUE NOT NULL,
-            password_hash BLOB NOT NULL,
+            password_hash TEXT NOT NULL,
             created_at TEXT DEFAULT (datetime('now'))
         );""")
 
