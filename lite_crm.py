@@ -1,11 +1,13 @@
 
-    import os
-    import sqlite3
-    import pandas as pd
-    import streamlit as st
-    from datetime import datetime, date, timedelta
-    import secrets
-    import hashlib, hmac, base64, os
+import os
+import base64
+import hashlib
+import hmac
+import streamlit as st
+import pandas as pd
+import sqlite3
+
+
 
     DB_PATH = "lite_crm.db"
 
