@@ -2,6 +2,11 @@
 import sqlite3
 import pandas as pd
 import streamlit as st
+if not hasattr(st, "rerun"):
+    # Backward-compat for older Streamlit
+    def _compat_rerun():
+        st.experimental_rerun()
+    st.rerun = _compat_rerun
 from datetime import datetime, date
 
 DB_PATH = "lite_crm.db"
@@ -215,7 +220,7 @@ def companies_page():
                 data = {"name": name.strip(), "domain": domain.strip(), "phone": phone.strip(), "website": website.strip(), "owner": owner}
                 new_id = upsert("companies", data, id=(cid or None))
                 st.success(f"Saved company with ID {new_id}")
-                st.experimental_rerun()
+                st.rerun()
 
     q = search_box("Search by name or domain...", key="q_companies")
     if q:
