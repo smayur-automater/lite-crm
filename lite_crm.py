@@ -230,7 +230,7 @@ def companies_page():
             if del_id > 0:
                 delete_row("companies", del_id)
                 st.warning(f"Deleted company {del_id}")
-                st.experimental_rerun())
+                st.experimental_rerun()
             else:
                 st.error("Enter a valid ID.")
 
