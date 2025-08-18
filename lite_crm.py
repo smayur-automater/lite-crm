@@ -208,7 +208,7 @@ def companies_page():
         website = st.text_input("Website")
         owner = owner_input()
 
-        if st.button("Save Company", type="primary"):
+        if st.button("Save Company", type="secondary"):
             if not name.strip():
                 st.error("Name is required")
             else:
