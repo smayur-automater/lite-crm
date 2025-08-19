@@ -3,7 +3,7 @@ import base64
 import hashlib
 import hmac
 import sqlite3
-from datetime import datetime, date
+from datetime import date
 import streamlit as st
 import pandas as pd
 
@@ -11,7 +11,12 @@ import pandas as pd
 # App config
 # ------------------------
 try:
-    st.set_page_config(page_title="Lite CRM", page_icon="📇", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(
+        page_title="Lite CRM",
+        page_icon="📇",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
 except Exception:
     pass
 
@@ -82,7 +87,7 @@ def init_db():
         )
     """)
 
-    # Deals (new)
+    # Deals
     c.execute("""
         CREATE TABLE IF NOT EXISTS deals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,7 +102,7 @@ def init_db():
         )
     """)
 
-    # Tasks (new)
+    # Tasks
     c.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -121,6 +126,14 @@ init_db()
 # ------------------------
 # Auth
 # ------------------------
+def any_user_exists() -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT 1 FROM users LIMIT 1")
+    exists = c.fetchone() is not None
+    conn.close()
+    return exists
+
 def create_user(name, email, password):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -129,11 +142,10 @@ def create_user(name, email, password):
         c.execute("INSERT INTO users (name,email,password_hash) VALUES (?,?,?)", (name, email.lower().strip(), pw_hash))
         conn.commit()
     except sqlite3.IntegrityError:
-        st.error("User already exists")
-        return False
+        return False, "User already exists"
     finally:
         conn.close()
-    return True
+    return True, "Account created"
 
 def login_user(email, password):
     conn = sqlite3.connect(DB_PATH)
@@ -144,6 +156,49 @@ def login_user(email, password):
     if row and check_password(password, row[2]):
         return {"id": row[0], "name": row[1], "email": email}
     return None
+
+def logout_user():
+    st.session_state.user = None
+
+# ------------------------
+# Inline Login (since there are no dedicated pages)
+# ------------------------
+def login_panel(show_register_bootstrap: bool = True):
+    """Inline panel shown on any CRM page when not logged in."""
+    st.subheader("🔒 Login required")
+    with st.form("login_form", clear_on_submit=False):
+        email = st.text_input("Email")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Log in")
+        if submitted:
+            user = login_user(email, password)
+            if user:
+                st.session_state.user = user
+                st.success(f"Welcome back, {user['name']}!")
+                st.experimental_rerun()
+            else:
+                st.error("Invalid credentials")
+
+    # If no users exist at all, allow bootstrapping the first account here
+    if show_register_bootstrap and not any_user_exists():
+        st.info("No users found yet. Create the first account:")
+        with st.form("bootstrap_register"):
+            name = st.text_input("Full name", key="reg_name")
+            email2 = st.text_input("Admin email", key="reg_email")
+            pw1 = st.text_input("Password", type="password", key="reg_pw1")
+            pw2 = st.text_input("Confirm password", type="password", key="reg_pw2")
+            ok = st.form_submit_button("Create first account")
+            if ok:
+                if not name or not email2 or not pw1:
+                    st.error("All fields are required.")
+                elif pw1 != pw2:
+                    st.error("Passwords do not match.")
+                else:
+                    created, msg = create_user(name, email2, pw1)
+                    if created:
+                        st.success("Account created. Please log in above.")
+                    else:
+                        st.error(msg)
 
 # ------------------------
 # Pages
@@ -295,59 +350,48 @@ def tasks_page(user):
     st.dataframe(df, use_container_width=True)
 
 # ------------------------
-# Main (Sidebar nav with fixed items)
+# Gate wrapper (always show sidebar; gate content if not logged in)
+# ------------------------
+def render_page_or_login(page_fn):
+    user = st.session_state.get("user")
+    if user is None:
+        login_panel(show_register_bootstrap=True)
+    else:
+        page_fn(user)
+
+# ------------------------
+# Main (Sidebar is always visible; no Login/Register pages)
 # ------------------------
 def main():
     st.title("Lite CRM")
 
     if "user" not in st.session_state:
-        st.session_state.user = None
+        st.session_state.user = None  # {"id":..., "name":..., "email":...}
 
-    # Build sidebar first
+    # Fixed sidebar items (always visible)
     st.sidebar.header("Menu")
+    nav = st.sidebar.radio(
+        "Navigate",
+        ["Companies", "Deals", "Contacts", "Tasks", "Logout"],
+        index=0,
+    )
 
-    if st.session_state.user is None:
-        nav = st.sidebar.radio("Navigate", ["Login", "Register"], index=0)
-        if nav == "Register":
-            st.subheader("Create new account")
-            name = st.text_input("Name")
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            if st.button("Register"):
-                if name and email and password:
-                    if create_user(name, email, password):
-                        st.success("Account created! Please login.")
-                        st.experimental_rerun()
-                else:
-                    st.error("Please fill all fields.")
-        elif nav == "Login":
-            st.subheader("Login")
-            email = st.text_input("Email")
-            password = st.text_input("Password", type="password")
-            if st.button("Login"):
-                user = login_user(email, password)
-                if user:
-                    st.session_state.user = user
-                    st.success(f"Welcome {user['name']}!")
-                    st.experimental_rerun()
-                else:
-                    st.error("Invalid credentials")
-    else:
-        # Fixed list — no dropdown — exactly the pages you asked for:
-        nav = st.sidebar.radio("Navigate", ["Companies", "Deals", "Contacts", "Tasks", "Logout"], index=0)
-
-        if nav == "Companies":
-            companies_page(st.session_state.user)
-        elif nav == "Deals":
-            deals_page(st.session_state.user)
-        elif nav == "Contacts":
-            contacts_page(st.session_state.user)
-        elif nav == "Tasks":
-            tasks_page(st.session_state.user)
-        elif nav == "Logout":
-            st.session_state.user = None
+    # Router
+    if nav == "Companies":
+        render_page_or_login(companies_page)
+    elif nav == "Deals":
+        render_page_or_login(deals_page)
+    elif nav == "Contacts":
+        render_page_or_login(contacts_page)
+    elif nav == "Tasks":
+        render_page_or_login(tasks_page)
+    elif nav == "Logout":
+        if st.session_state.user:
+            logout_user()
             st.success("Logged out!")
-            st.experimental_rerun()
+        else:
+            st.info("You are not logged in.")
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
