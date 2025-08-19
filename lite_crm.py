@@ -124,6 +124,15 @@ def init_db():
 init_db()
 
 # ------------------------
+# Small DB helpers
+# ------------------------
+def read_df(sql, params=()):
+    conn = sqlite3.connect(DB_PATH)
+    df = pd.read_sql_query(sql, conn, params=params)
+    conn.close()
+    return df
+
+# ------------------------
 # Auth
 # ------------------------
 def any_user_exists() -> bool:
@@ -203,6 +212,67 @@ def login_panel(show_register_bootstrap: bool = True):
 # ------------------------
 # Pages
 # ------------------------
+def dashboard_page(user):
+    st.subheader("📊 Dashboard")
+
+    # Top metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        companies_count = read_df("SELECT COUNT(*) AS c FROM companies")["c"][0]
+        st.metric("Companies", int(companies_count))
+    with col2:
+        contacts_count = read_df("SELECT COUNT(*) AS c FROM contacts")["c"][0]
+        st.metric("Contacts", int(contacts_count))
+    with col3:
+        open_deals = read_df(
+            "SELECT COUNT(*) AS c FROM deals WHERE stage NOT IN ('Closed Won','Closed Lost')"
+        )["c"][0]
+        st.metric("Open Deals", int(open_deals))
+    with col4:
+        open_tasks = read_df("SELECT COUNT(*) AS c FROM tasks WHERE status='Open'")["c"][0]
+        st.metric("Open Tasks", int(open_tasks))
+
+    st.divider()
+
+    # Upcoming tasks (next 14 days)
+    st.subheader("📅 Upcoming Tasks (next 14 days)")
+    upcoming = read_df(
+        """
+        SELECT id, title, due_date, status, priority, related_type, related_id
+        FROM tasks
+        WHERE status='Open'
+          AND due_date IS NOT NULL
+          AND due_date <= date('now', '+14 day')
+        ORDER BY due_date ASC
+        """
+    )
+    if upcoming.empty:
+        st.info("No upcoming tasks.")
+    else:
+        st.dataframe(upcoming, use_container_width=True)
+
+    st.subheader("💼 Deals by Stage")
+    by_stage = read_df(
+        """
+        SELECT stage, COUNT(*) AS deals, COALESCE(SUM(amount),0) AS pipeline
+        FROM deals
+        GROUP BY stage
+        ORDER BY
+          CASE stage
+            WHEN 'New' THEN 1
+            WHEN 'Qualified' THEN 2
+            WHEN 'Proposal' THEN 3
+            WHEN 'Negotiation' THEN 4
+            WHEN 'Closed Won' THEN 5
+            WHEN 'Closed Lost' THEN 6
+            ELSE 7 END
+        """
+    )
+    if by_stage.empty:
+        st.info("No deals yet.")
+    else:
+        st.dataframe(by_stage, use_container_width=True)
+
 def companies_page(user):
     st.subheader("Companies")
     with st.form("add_company"):
@@ -223,12 +293,9 @@ def companies_page(user):
                 st.success("Company added!")
 
     # Show companies
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
-        "SELECT id, name, industry, created_by, created_at FROM companies ORDER BY created_at DESC",
-        conn
+    df = read_df(
+        "SELECT id, name, industry, created_by, created_at FROM companies ORDER BY created_at DESC"
     )
-    conn.close()
     st.dataframe(df, use_container_width=True)
 
 def contacts_page(user):
@@ -253,18 +320,15 @@ def contacts_page(user):
                 conn.close()
                 st.success("Contact added!")
 
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
+    df = read_df(
         """
         SELECT c.id, c.name, c.email, c.phone, c.company_id, c.created_at,
                co.name AS company_name
         FROM contacts c
         LEFT JOIN companies co ON co.id = c.company_id
         ORDER BY c.created_at DESC
-        """,
-        conn
+        """
     )
-    conn.close()
     st.dataframe(df, use_container_width=True)
 
 def deals_page(user):
@@ -295,16 +359,13 @@ def deals_page(user):
                 conn.close()
                 st.success("Deal added!")
 
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
+    df = read_df(
         """
         SELECT d.id, d.name, d.stage, d.amount, d.close_date, d.company_id, d.contact_id, d.created_at
         FROM deals d
         ORDER BY d.created_at DESC
-        """,
-        conn
+        """
     )
-    conn.close()
     st.dataframe(df, use_container_width=True)
 
 def tasks_page(user):
@@ -337,16 +398,13 @@ def tasks_page(user):
                 conn.close()
                 st.success("Task added!")
 
-    conn = sqlite3.connect(DB_PATH)
-    df = pd.read_sql_query(
+    df = read_df(
         """
         SELECT id, title, status, priority, due_date, related_type, related_id, created_at
         FROM tasks
         ORDER BY created_at DESC
-        """,
-        conn
+        """
     )
-    conn.close()
     st.dataframe(df, use_container_width=True)
 
 # ------------------------
@@ -372,12 +430,14 @@ def main():
     st.sidebar.header("Menu")
     nav = st.sidebar.radio(
         "Navigate",
-        ["Companies", "Deals", "Contacts", "Tasks", "Logout"],
+        ["Dashboard", "Companies", "Deals", "Contacts", "Tasks", "Logout"],
         index=0,
     )
 
     # Router
-    if nav == "Companies":
+    if nav == "Dashboard":
+        render_page_or_login(dashboard_page)
+    elif nav == "Companies":
         render_page_or_login(companies_page)
     elif nav == "Deals":
         render_page_or_login(deals_page)
